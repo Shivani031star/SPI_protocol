@@ -1,31 +1,28 @@
 `timescale 1ns / 1ps
 
 module spi_master #(parameter DATA_WIDTH=8)
-( //system
-  input wire clk, //system clk
-  input wire rst_n, //active low sync reset
-  //control
-  input wire spi_en, //pulse for 1 cycle to start a transfer
-  input wire cpol, //clock polarity,unused
-  input wire cpha, //clock phase,unused
-  input wire [7:0] clk_div, //to establish connection bw clk and sclk,sclk freq=clk/(2*clk_div)
-  //data
-  input wire [DATA_WIDTH-1:0] tx_data,//byte to transmit when spi_en=1
-  output reg [DATA_WIDTH-1:0] rx_data,//rcvd byte
-  //status
-  output reg busy,//high while transfer in progress
-  output reg done,//1 when transfer is completed
-  //spi pins
-  output reg sclk,//spi serial clk output
-  output reg mosi,//master out slave in data line
-  output reg ss_n,//slave select (active low) 
-  input wire miso//master in slave out data line
+( input wire clk,
+  input wire rst_n,
+  input wire spi_en,
+  input wire cpol,
+  input wire cpha,
+  input wire [7:0] clk_div,
+  
+  input wire [DATA_WIDTH-1:0] tx_data,
+  output reg [DATA_WIDTH-1:0] rx_data,
+  
+  output reg busy,
+  output reg done,
+  output reg sclk,
+  output reg mosi,
+  output reg ss_n,
+  input wire miso
 );
 
-localparam [1:0] S_IDLE = 2'b00,//wait for spi_en pulse
-                 S_LOAD = 2'b01,//latch tx data,assert ss_n,pre-drive mosi(cpha=0)
-                 S_SHIFT = 2'b10,//toggle sclk,shift mosi out,shift miso in
-                 S_DONE = 2'b11;//pulse done flag,deassert ss_n,return to idle
+localparam [1:0] S_IDLE = 2'b00,
+                 S_LOAD = 2'b01,
+                 S_SHIFT = 2'b10,
+                 S_DONE = 2'b11;
                  
 //INTERNAL REGISTER
 reg [1:0] state;
@@ -34,24 +31,15 @@ reg [DATA_WIDTH-1:0] rx_shift;
 reg [7:0] div_cnt;//clock divider down counter
 reg [3:0] bit_cnt;//Number of bits captured
 
-//clock sampling mode
-//wire sample_on_pos = ~(cpol ^ cpha); //clock mode
-localparam sample_on_pos = 1'b1; //mode0 always sample on rising edge
-//SCLK edge detection (look ahead style)
+wire sample_on_pos = ~(cpol ^ cpha); //clock mode
+
 wire sclk_toggle = (state == S_SHIFT) && (div_cnt == clk_div - 8'd1);
 wire pos_edge = sclk_toggle && (~sclk); //0 -> 1
 wire neg_edge = sclk_toggle && (sclk); //1 -> 0
 
-/*
 wire sample_edge = sample_on_pos ? pos_edge : neg_edge;
 wire shift_edge = sample_on_pos ? neg_edge : pos_edge;
-*/
 
-//mode 0 fixed maping
-wire sample_edge = pos_edge;
-wire shift_edge = neg_edge;
-
-//clock divider and SCLK generator
 always @(posedge clk) begin
 if(!rst_n) begin
     div_cnt <= 8'b0;
@@ -66,8 +54,7 @@ if(!rst_n) begin
           end
       end else begin
           div_cnt <= 8'b0;
-          //sclk <= cpol;//idle level
-          sclk <= 1'b0; //mode:0 always low(fixed)
+          sclk <= cpol;
       end
    end
 end       
@@ -104,15 +91,12 @@ end else begin
            ss_n     <= 1'b0;
            busy     <= 1'b1;
            
-           /*if(!cpha)
-           mosi <= tx_data[DATA_WIDTH-1];//pre drive MSB for mode 0/2
-           */
-           mosi <= tx_data[DATA_WIDTH-1]; //Mode0:always pre-drive MSB
+           if(!cpha)
+           mosi <= tx_data[DATA_WIDTH-1];
            state <= S_SHIFT;
            end
            
     S_SHIFT: begin
-          //sample MISO
           if(sample_edge) begin
             if (bit_cnt == DATA_WIDTH-1) begin
             rx_data <= {rx_shift[DATA_WIDTH-2:0],miso};
@@ -124,18 +108,15 @@ end else begin
           end
           end 
           
-          //shift MOSI
           if (shift_edge) begin
-             /*if(!cpha) begin
+          if(!cpha) begin
              mosi <= tx_shift[DATA_WIDTH-2];
-             end 
-             else begin
+             end else begin
              mosi <= tx_shift[DATA_WIDTH-1];
-             end*/
-             mosi <= tx_shift[DATA_WIDTH-2];
+             end
              tx_shift <= {tx_shift[DATA_WIDTH-2:0],1'b0};
              end
-        end
+             end
  
  S_DONE: begin
         ss_n <= 1'b1;

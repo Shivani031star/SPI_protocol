@@ -1,42 +1,30 @@
 `timescale 1ns / 1ps
 
 module spi_slave #(parameter DATA_WIDTH = 8)(
-//system
-input wire clk,//system clk
-input wire rst_n,//synch rst
-//mode config
-input wire cpol,//unused
-input wire cpha,//unused
-//spi pins
-input wire sclk_in,//sclk from master
-input wire mosi,//data froom master
-output reg miso,//data to slave
-input wire ss_n_in,//slave select from master
-//data interface
-input wire [DATA_WIDTH-1:0] tx_data,//byte send from master
-output reg [DATA_WIDTH-1:0] rx_data,//byte rcvd from master
-output reg rx_done //1 cycle pulse when a complete byte is rvcd
+input wire clk,
+input wire rst_n,
+input wire cpol,
+input wire cpha,
+
+input wire sclk_in,
+input wire mosi,
+output reg miso,
+input wire ss_n_in,
+
+input wire [DATA_WIDTH-1:0] tx_data,
+output reg [DATA_WIDTH-1:0] rx_data,
+output reg rx_done
 );
 
 localparam [1:0] S_IDLE = 2'd0,
                  S_ACTIVE = 2'd1,
                  S_DONE = 2'd2;
-
-//internal register                 
+                 
 reg [1:0]            state;
-reg [DATA_WIDTH-1:0] tx_shift;//msb first  
+reg [DATA_WIDTH-1:0] tx_shift;   
 reg [DATA_WIDTH-1:0] rx_shift;   
-reg [3:0]            bit_cnt;//0 to data_width-1 
+reg [3:0]            bit_cnt; 
 
-//2 FF SYNC for SCLK and SS_N
-/*
-  Why synchronize?
-    SCLK and SS_N come from a different clock source (the master's
-    SCLK divider) or from external pins.  Even on the same FPGA,
-    SCLK is asynchronous to posedge clk at the slave's input.
-    Two flip-flops reduce the probability of metastability to an
-    acceptable level.
-*/
 //SCLK synchronizer
 
 reg sclk_d1,sclk_d2,sclk_d3;
@@ -69,7 +57,7 @@ always @(posedge clk) begin
 end      
 
 //MOSI synchronizer
-//1FF is sufficient
+
 reg mosi_s;
 
 always @(posedge clk) begin
@@ -85,14 +73,10 @@ wire ss_rise   = ( ssn_d2)  & (~ssn_d3);   // SS_N deasserted(0?1)
 
 
 //clock mode
-
-/*wire sample_on_pos = ~(cpol ^ cpha); 
+wire sample_on_pos = ~(cpol ^ cpha);
+ 
 wire sample_edge = sample_on_pos ? sclk_rise : sclk_fall;
 wire shift_edge  = sample_on_pos ? sclk_fall  : sclk_rise;
-*/
-
-wire sample_edge = sclk_rise;
-wire shift_edge = sclk_fall;
 
 //main FSM
 always @(posedge clk) begin
@@ -113,34 +97,32 @@ always @(posedge clk) begin
                tx_shift <= tx_data;
                rx_shift <= {DATA_WIDTH{1'b0}};
                bit_cnt  <= 4'd0;
-               //if (!cpha)
+               if (!cpha)
                miso <= tx_data[DATA_WIDTH-1];  // Pre-drive MSB
                state <= S_ACTIVE;
                end
            end  
        
       S_ACTIVE: begin
-           //capture MOSI on sampe edge
            if (sample_edge) begin
                if (bit_cnt == DATA_WIDTH - 1) begin
-               // 8th bit -> latch full byte, done
+               // 8th bit ? latch full byte, done
                rx_data <= {rx_shift[DATA_WIDTH-2:0], mosi_s};
                state   <= S_DONE;
                end else begin
                rx_shift <= {rx_shift[DATA_WIDTH-2:0], mosi_s};
                bit_cnt  <= bit_cnt + 4'd1;
                end
-            end
-           //abort on SS_N high 
+               end
            else if (ss_rise) begin
            state <= S_IDLE;
            end
-           //update MISO on shift edge
+           
             if (shift_edge) begin
-               /*if (!cpha)
+               if (!cpha)
                miso <= tx_shift[DATA_WIDTH-2]; // CPHA=0: next bit
-               else*/
-               miso <= tx_shift[DATA_WIDTH-2]; // mode 0: next bit
+               else
+               miso <= tx_shift[DATA_WIDTH-1]; // CPHA=1: current bit
                tx_shift <= {tx_shift[DATA_WIDTH-2:0], 1'b0};
                end
            end
